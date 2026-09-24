@@ -1,0 +1,58 @@
+from langgraph.graph import MessagesState, StateGraph
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+key = os.getenv('OPENAI_KEY')
+chat = ChatOpenAI(model = 'gpt-3.5-turbo', temperature = 0.5, api_key = key)
+
+class State(MessagesState):
+    context : str
+
+def retriever(state : State):
+    question = state['messages'][-1].content
+    docs = retriever.invoke(question)
+    context = '\n\n'.join(doc.page_content for doc in docs)
+
+    return {'context' : context}
+
+def chat_contexto(state : State):
+    question = state['messages'][-1].content
+    prompt = f'''
+    Responda usando somente o contexto abaixo.
+    Contexto:
+    {state['context']}
+
+    Pergunta:
+    {question}
+    '''
+
+    resposta = chat.invoke(prompt)
+    return {'messages': [resposta]}
+
+memoria = InMemorySaver()
+
+graph = StateGraph(State)
+graph.add_node('retriever', retriever)
+graph.add_node('generate', chat_contexto)
+graph.set_entry_point('retriever')
+graph.add_edge('retriever', 'generate')
+graph.set_finish_point('generate')
+app = graph.compile( checkpointer = memoria )
+
+configuracao = {'config': {'primeira conversa':'conversa_1'}}
+
+while True:
+
+    pergunta = input('Você:')
+    if pergunta.lower() in ['sair', 'exit', 'quit']:
+        break
+
+    contexto = {'messages':[HumanMessage(content = pergunta)]}
+    resposta = app.invoke(contexto, config = configuracao)
+    chat_resposta = resposta['messages'][-1].content
+    
+    print('AI:', chat_resposta)
